@@ -378,6 +378,77 @@ def create_interactive_dashboard(df, output_dir, column_map):
     
     return html_file
 
+def create_spider_chart(df, output_dir, column_map):
+    """Create a spider/radar chart of key metrics."""
+    # Calculate metrics as percentage of their max values
+    # For visualization purposes, we'll limit outliers to 100%
+    metrics_data = {
+        'CPU Usage': min(100, df['cpu_usage_rate'].max() * 100),  # CPU usage percentage
+        'Memory Usage': min(100, (df[column_map['memory_current']].max() / 
+                              df[column_map['memory_peak']].max()) * 100),  # Memory usage percentage
+    }
+    
+    # Add swap usage if it exists and is non-zero
+    if 'memory_swap_current' in column_map and df[column_map['memory_swap_current']].max() > 0:
+        swap_max = df[column_map['memory_swap_max']].replace('max', str(float('inf'))).astype(float).max()
+        if np.isinf(swap_max):  # If no swap limit is defined
+            swap_max = df[column_map['memory_swap_current']].max() * 2  # Use double the max usage as reference
+        swap_pct = min(100, (df[column_map['memory_swap_current']].max() / swap_max) * 100)
+        metrics_data['Swap Usage'] = swap_pct
+    
+    # Add PIDs usage if it exists
+    if 'pids_current' in column_map:
+        pids_max = df[column_map['pids_max']].replace('max', str(float('inf'))).astype(float).max()
+        if np.isinf(pids_max):  # If no PIDs limit is defined
+            pids_max = df[column_map['pids_peak']].max()  # Use peak as reference
+        pids_pct = min(100, (df[column_map['pids_current']].max() / pids_max) * 100)
+        metrics_data['PIDs Usage'] = pids_pct
+    
+    # Add pressure metrics if they exist
+    if 'cpu_pressure_some_avg10' in column_map:
+        metrics_data['CPU Pressure'] = df[column_map['cpu_pressure_some_avg10']].max()
+    if 'memory_pressure_some_avg10' in column_map:
+        metrics_data['Mem Pressure'] = df[column_map['memory_pressure_some_avg10']].max()
+    
+    # Create the spider chart
+    categories = list(metrics_data.keys())
+    values = list(metrics_data.values())
+    
+    # Number of variables
+    N = len(categories)
+    
+    # Create angle values for each category
+    angles = [n / float(N) * 2 * np.pi for n in range(N)]
+    angles += angles[:1]  # Close the loop
+    
+    # Add values for the plot and close the loop
+    values += values[:1]
+    
+    # Create plot
+    fig = plt.figure(figsize=(8, 8))
+    ax = plt.subplot(111, polar=True)
+    
+    # Draw the chart
+    plt.xticks(angles[:-1], categories, color='black', size=12)
+    ax.set_rlabel_position(0)
+    plt.yticks([25, 50, 75, 100], ["25%", "50%", "75%", "100%"], color="grey", size=10)
+    plt.ylim(0, 100)
+    
+    # Plot data
+    ax.plot(angles, values, linewidth=2, linestyle='solid')
+    
+    # Fill area
+    ax.fill(angles, values, alpha=0.4)
+    
+    # Add title
+    plt.title("Resource Utilization Overview", size=16, y=1.1)
+    
+    # Save the chart
+    plt.savefig(output_dir / 'spider_chart.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    return categories, values[:-1]  # Return without the duplicate last value
+
 def create_summary_html(df, output_dir, column_map):
     """Create a summary HTML page with key statistics."""
     monitoring_time = df['elapsed_sec'].max() - df['elapsed_sec'].min()
@@ -549,6 +620,7 @@ def create_summary_html(df, output_dir, column_map):
                 <h2>Dashboard Views</h2>
                 <a href="interactive_dashboard.html" class="link-button">📊 Interactive Dashboard</a>
                 <a href="dashboard.png" class="link-button">📈 Static Dashboard</a>
+                <a href="spider_chart.png" class="link-button">🕸️ Spider Chart</a>
             </div>
             
             <div class="timestamp">
@@ -601,6 +673,9 @@ def main():
         print("Generating interactive HTML dashboard...")
         interactive_file = create_interactive_dashboard(df, output_dir, column_map)
         
+        print("Generating spider chart...")
+        create_spider_chart(df, output_dir, column_map)
+        
         print("Generating summary HTML page...")
         summary_file = create_summary_html(df, output_dir, column_map)
         
@@ -619,6 +694,7 @@ def main():
         print(f"\nGenerated files:")
         print(f"• Summary page: {summary_file}")
         print(f"• Interactive dashboard: {interactive_file}")
+        print(f"• Spider chart: {output_dir / 'spider_chart.png'}")
         if not args.html_only:
             print(f"• Static dashboard: {output_dir / 'dashboard.png'}")
         print(f"\nOpen {summary_file} in your browser to view the complete dashboard.")
