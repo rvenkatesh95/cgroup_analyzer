@@ -1,0 +1,169 @@
+
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Cgroup Metrics Dashboard</title>
+        <style>
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                margin: 0;
+                padding: 20px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+            }
+            .container {
+                max-width: 1200px;
+                margin: 0 auto;
+                background: white;
+                border-radius: 15px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+                overflow: hidden;
+            }
+            .header {
+                background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+                color: white;
+                padding: 30px;
+                text-align: center;
+            }
+            .header h1 {
+                margin: 0;
+                font-size: 2.5em;
+                font-weight: 300;
+            }
+            .header p {
+                margin: 10px 0 0 0;
+                opacity: 0.9;
+                font-size: 1.1em;
+            }
+            .stats-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                gap: 20px;
+                padding: 30px;
+            }
+            .stat-card {
+                background: #f8f9fa;
+                padding: 25px;
+                border-radius: 10px;
+                text-align: center;
+                transition: transform 0.3s ease;
+                border-left: 4px solid #4facfe;
+            }
+            .stat-card:hover {
+                transform: translateY(-5px);
+                box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            }
+            .stat-value {
+                font-size: 2.2em;
+                font-weight: bold;
+                color: #2c3e50;
+                margin-bottom: 10px;
+            }
+            .stat-label {
+                color: #7f8c8d;
+                font-size: 1em;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+            }
+            .dashboard-links {
+                padding: 30px;
+                text-align: center;
+                background: #f8f9fa;
+            }
+            .dashboard-links h2 {
+                color: #2c3e50;
+                margin-bottom: 20px;
+            }
+            .link-button {
+                display: inline-block;
+                margin: 10px 15px;
+                padding: 15px 30px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                text-decoration: none;
+                border-radius: 25px;
+                font-weight: bold;
+                transition: all 0.3s ease;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            }
+            .link-button:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+            }
+            .warning {
+                background: #fff3cd;
+                border: 1px solid #ffeaa7;
+                color: #856404;
+                padding: 15px;
+                margin: 20px 30px;
+                border-radius: 8px;
+            }
+            .timestamp {
+                text-align: center;
+                color: #7f8c8d;
+                font-size: 0.9em;
+                padding: 20px;
+                border-top: 1px solid #ecf0f1;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>Cgroup Metrics Dashboard</h1>
+                <p>Performance monitoring and resource utilization analysis</p>
+            </div>
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value">120.0s</div>
+                    <div class="stat-label">Monitoring Duration</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">148.4%</div>
+                    <div class="stat-label">Average CPU Usage</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">23205.5%</div>
+                    <div class="stat-label">Peak CPU Usage</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">907.6MB</div>
+                    <div class="stat-label">Average Memory</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">6670.1MB</div>
+                    <div class="stat-label">Peak Memory</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">850</div>
+                    <div class="stat-label">Average PIDs</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">850</div>
+                    <div class="stat-label">Peak PIDs</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">0</div>
+                    <div class="stat-label">OOM Events</div>
+                </div>
+            </div>
+            
+            
+            
+            <div class="dashboard-links">
+                <h2>Dashboard Views</h2>
+                <a href="interactive_dashboard.html" class="link-button">📊 Interactive Dashboard</a>
+                <a href="dashboard.png" class="link-button">📈 Static Dashboard</a>
+                <a href="spider_chart.png" class="link-button">🕸️ Spider Chart</a>
+            </div>
+            
+            <div class="timestamp">
+                Generated on 2025-06-23 11:30:19
+            </div>
+        </div>
+    </body>
+    </html>
+    
