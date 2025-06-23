@@ -15,13 +15,62 @@ plt.style.use('seaborn-v0_8')
 sns.set_theme(style="darkgrid")
 sns.set_palette("husl")
 
-def load_and_prepare_data(csv_file):
+def detect_cgroup_name(df):
+    """Detect cgroup name from DataFrame columns."""
+    # Find columns that match cgroup metrics pattern (excluding timestamp and elapsed_sec)
+    cgroup_columns = [col for col in df.columns if col not in ['timestamp', 'elapsed_sec']]
+    
+    if not cgroup_columns:
+        raise ValueError("No cgroup metric columns found in the DataFrame")
+    
+    # Extract the cgroup name from the first cgroup metric column
+    # Format is expected to be {cgroup_name}_{metric_name}
+    first_column = cgroup_columns[0]
+    cgroup_name = first_column.split('_')[0]
+    
+    # Validate that this prefix is consistent across cgroup columns
+    if not all(col.startswith(f"{cgroup_name}_") for col in cgroup_columns):
+        raise ValueError("Inconsistent cgroup prefixes found in column names")
+        
+    return cgroup_name
+
+def create_column_mapping(df, cgroup_name):
+    """Create mapping between generic metric names and actual column names."""
+    mapping = {}
+    generic_metrics = [
+        # CPU metrics
+        'cpu_usage_usec', 'cpu_user_usec', 'cpu_system_usec',
+        'cpu_nr_periods', 'cpu_nr_throttled', 'cpu_throttled_usec',
+        'cpu_pressure_some_avg10', 'cpu_pressure_full_avg10',
+        # Memory metrics
+        'memory_current', 'memory_peak', 'memory_max',
+        'memory_anon', 'memory_file', 'memory_kernel',
+        'memory_swap_current', 'memory_swap_max',
+        'memory_oom_events', 'memory_oom_kill_events',
+        'memory_pressure_some_avg10', 'memory_pressure_full_avg10',
+        # PIDs metrics
+        'pids_current', 'pids_peak', 'pids_max', 'cgroup_procs_count'
+    ]
+    
+    for metric in generic_metrics:
+        column_name = f"{cgroup_name}_{metric}"
+        if column_name in df.columns:
+            mapping[metric] = column_name
+    
+    return mapping
+
+def load_and_prepare_data(csv_file, cgroup_name=None):
     """Load and prepare the CSV data for visualization."""
     df = pd.read_csv(csv_file)
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
-    return df
+    
+    # Detect cgroup name if not provided
+    if not cgroup_name:
+        cgroup_name = detect_cgroup_name(df)
+    
+    return df, cgroup_name
 
-def create_static_dashboard(df, output_dir):
+def create_static_dashboard(df, output_dir, column_map):
     """Create a combined dashboard of all metrics (static PNG)."""
     # Create a large figure with subplots
     fig = plt.figure(figsize=(20, 20))  # Increased height for heatmaps
@@ -29,30 +78,30 @@ def create_static_dashboard(df, output_dir):
 
     # CPU Metrics (Row 1)
     ax_cpu = fig.add_subplot(gs[0, 0])
-    df['cpu_usage_rate'] = df['mycpu_cpu_usage_usec'].diff() / df['elapsed_sec'].diff() / 1e6
+    df['cpu_usage_rate'] = df[column_map['cpu_usage_usec']].diff() / df['elapsed_sec'].diff() / 1e6
     ax_cpu.plot(df['elapsed_sec'], df['cpu_usage_rate'] * 100)
     ax_cpu.set_title('CPU Usage Rate')
     ax_cpu.set_ylabel('CPU Usage (%)')
     ax_cpu.set_xlabel('Time (s)')
 
     ax_cpu_pressure = fig.add_subplot(gs[0, 1])
-    ax_cpu_pressure.plot(df['elapsed_sec'], df['mycpu_cpu_pressure_some_avg10'], 
+    ax_cpu_pressure.plot(df['elapsed_sec'], df[column_map['cpu_pressure_some_avg10']], 
                         label='Some')
-    ax_cpu_pressure.plot(df['elapsed_sec'], df['mycpu_cpu_pressure_full_avg10'], 
+    ax_cpu_pressure.plot(df['elapsed_sec'], df[column_map['cpu_pressure_full_avg10']], 
                         label='Full')
     ax_cpu_pressure.set_title('CPU Pressure')
     ax_cpu_pressure.legend()
 
     ax_cpu_throttle = fig.add_subplot(gs[0, 2])
-    throttled_ms = df['mycpu_cpu_throttled_usec'] / 1000
+    throttled_ms = df[column_map['cpu_throttled_usec']] / 1000
     ax_cpu_throttle.plot(df['elapsed_sec'], throttled_ms)
     ax_cpu_throttle.set_title('CPU Throttling')
     ax_cpu_throttle.set_ylabel('Throttled Time (ms)')
 
     # Memory Metrics (Row 2)
     ax_mem = fig.add_subplot(gs[1, 0])
-    df['memory_current_mb'] = df['mycpu_memory_current'] / (1024 * 1024)
-    df['memory_peak_mb'] = df['mycpu_memory_peak'] / (1024 * 1024)
+    df['memory_current_mb'] = df[column_map['memory_current']] / (1024 * 1024)
+    df['memory_peak_mb'] = df[column_map['memory_peak']] / (1024 * 1024)
     ax_mem.plot(df['elapsed_sec'], df['memory_current_mb'], label='Current')
     ax_mem.plot(df['elapsed_sec'], df['memory_peak_mb'], label='Peak')
     ax_mem.set_title('Memory Usage')
@@ -60,31 +109,31 @@ def create_static_dashboard(df, output_dir):
     ax_mem.legend()
 
     ax_mem_pressure = fig.add_subplot(gs[1, 1])
-    ax_mem_pressure.plot(df['elapsed_sec'], df['mycpu_memory_pressure_some_avg10'], 
+    ax_mem_pressure.plot(df['elapsed_sec'], df[column_map['memory_pressure_some_avg10']], 
                         label='Some')
-    ax_mem_pressure.plot(df['elapsed_sec'], df['mycpu_memory_pressure_full_avg10'], 
+    ax_mem_pressure.plot(df['elapsed_sec'], df[column_map['memory_pressure_full_avg10']], 
                         label='Full')
     ax_mem_pressure.set_title('Memory Pressure')
     ax_mem_pressure.legend()
 
     ax_swap = fig.add_subplot(gs[1, 2])
-    df['swap_mb'] = df['mycpu_memory_swap_current'] / (1024 * 1024)
+    df['swap_mb'] = df[column_map['memory_swap_current']] / (1024 * 1024)
     ax_swap.plot(df['elapsed_sec'], df['swap_mb'])
     ax_swap.set_title('Swap Usage')
     ax_swap.set_ylabel('Swap (MB)')
 
     # PIDs and Events (Row 3)
     ax_pids = fig.add_subplot(gs[2, 0])
-    ax_pids.plot(df['elapsed_sec'], df['mycpu_pids_current'], label='PIDs')
-    ax_pids.plot(df['elapsed_sec'], df['mycpu_cgroup_procs_count'], 
+    ax_pids.plot(df['elapsed_sec'], df[column_map['pids_current']], label='PIDs')
+    ax_pids.plot(df['elapsed_sec'], df[column_map['cgroup_procs_count']], 
                  label='Processes')
     ax_pids.set_title('PIDs and Processes')
     ax_pids.legend()
 
     ax_oom = fig.add_subplot(gs[2, 1])
-    ax_oom.plot(df['elapsed_sec'], df['mycpu_memory_oom_events'], 
+    ax_oom.plot(df['elapsed_sec'], df[column_map['memory_oom_events']], 
                 label='OOM Events', marker='o')
-    ax_oom.plot(df['elapsed_sec'], df['mycpu_memory_oom_kill_events'], 
+    ax_oom.plot(df['elapsed_sec'], df[column_map['memory_oom_kill_events']], 
                 label='OOM Kills', marker='x')
     ax_oom.set_title('OOM Events')
     ax_oom.legend()
@@ -123,12 +172,12 @@ def create_static_dashboard(df, output_dir):
     ax_mem_heat = fig.add_subplot(gs[4, :])
     
     # Calculate memory usage percentage
-    max_memory = df['mycpu_memory_max'].replace('max', str(float('inf'))).astype(float)
+    max_memory = df[column_map['memory_max']].replace('max', str(float('inf'))).astype(float)
     if np.all(np.isinf(max_memory)):
         # If no memory limit is set, calculate percentage relative to peak memory
-        max_memory = df['mycpu_memory_peak'].max()
+        max_memory = df[column_map['memory_peak']].max()
     
-    df['memory_usage_pct'] = (df['mycpu_memory_current'] / max_memory) * 100
+    df['memory_usage_pct'] = (df[column_map['memory_current']] / max_memory) * 100
     
     try:
         # Try to create quantile bins, but handle cases with duplicate values
@@ -157,9 +206,9 @@ def create_static_dashboard(df, output_dir):
 
     # Memory Components (Row 6)
     ax_mem_comp = fig.add_subplot(gs[5, :])
-    df['anon_mb'] = df['mycpu_memory_anon'] / (1024 * 1024)
-    df['file_mb'] = df['mycpu_memory_file'] / (1024 * 1024)
-    df['kernel_mb'] = df['mycpu_memory_kernel'] / (1024 * 1024)
+    df['anon_mb'] = df[column_map['memory_anon']] / (1024 * 1024)
+    df['file_mb'] = df[column_map['memory_file']] / (1024 * 1024)
+    df['kernel_mb'] = df[column_map['memory_kernel']] / (1024 * 1024)
     ax_mem_comp.stackplot(df['elapsed_sec'], 
                          [df['anon_mb'], df['file_mb'], df['kernel_mb']],
                          labels=['Anonymous', 'File-backed', 'Kernel'])
@@ -172,17 +221,17 @@ def create_static_dashboard(df, output_dir):
     plt.savefig(output_dir / 'dashboard.png', dpi=300, bbox_inches='tight')
     plt.close()
 
-def create_interactive_dashboard(df, output_dir):
+def create_interactive_dashboard(df, output_dir, column_map):
     """Create an interactive HTML dashboard using Plotly."""
     # Prepare data
-    df['cpu_usage_rate'] = df['mycpu_cpu_usage_usec'].diff() / df['elapsed_sec'].diff() / 1e6
-    df['memory_current_mb'] = df['mycpu_memory_current'] / (1024 * 1024)
-    df['memory_peak_mb'] = df['mycpu_memory_peak'] / (1024 * 1024)
-    df['swap_mb'] = df['mycpu_memory_swap_current'] / (1024 * 1024)
-    df['throttled_ms'] = df['mycpu_cpu_throttled_usec'] / 1000
-    df['anon_mb'] = df['mycpu_memory_anon'] / (1024 * 1024)
-    df['file_mb'] = df['mycpu_memory_file'] / (1024 * 1024)
-    df['kernel_mb'] = df['mycpu_memory_kernel'] / (1024 * 1024)
+    df['cpu_usage_rate'] = df[column_map['cpu_usage_usec']].diff() / df['elapsed_sec'].diff() / 1e6
+    df['memory_current_mb'] = df[column_map['memory_current']] / (1024 * 1024)
+    df['memory_peak_mb'] = df[column_map['memory_peak']] / (1024 * 1024)
+    df['swap_mb'] = df[column_map['memory_swap_current']] / (1024 * 1024)
+    df['throttled_ms'] = df[column_map['cpu_throttled_usec']] / 1000
+    df['anon_mb'] = df[column_map['memory_anon']] / (1024 * 1024)
+    df['file_mb'] = df[column_map['memory_file']] / (1024 * 1024)
+    df['kernel_mb'] = df[column_map['memory_kernel']] / (1024 * 1024)
     
     # Create subplots
     fig = make_subplots(
@@ -206,12 +255,12 @@ def create_interactive_dashboard(df, output_dir):
     )
     
     fig.add_trace(
-        go.Scatter(x=df['elapsed_sec'], y=df['mycpu_cpu_pressure_some_avg10'],
+        go.Scatter(x=df['elapsed_sec'], y=df[column_map['cpu_pressure_some_avg10']],
                    mode='lines', name='Some', line=dict(color='#4ECDC4')),
         row=1, col=2
     )
     fig.add_trace(
-        go.Scatter(x=df['elapsed_sec'], y=df['mycpu_cpu_pressure_full_avg10'],
+        go.Scatter(x=df['elapsed_sec'], y=df[column_map['cpu_pressure_full_avg10']],
                    mode='lines', name='Full', line=dict(color='#45B7D1')),
         row=1, col=2
     )
@@ -236,12 +285,12 @@ def create_interactive_dashboard(df, output_dir):
     )
     
     fig.add_trace(
-        go.Scatter(x=df['elapsed_sec'], y=df['mycpu_memory_pressure_some_avg10'],
+        go.Scatter(x=df['elapsed_sec'], y=df[column_map['memory_pressure_some_avg10']],
                    mode='lines', name='Some', line=dict(color='#BB8FCE')),
         row=2, col=2
     )
     fig.add_trace(
-        go.Scatter(x=df['elapsed_sec'], y=df['mycpu_memory_pressure_full_avg10'],
+        go.Scatter(x=df['elapsed_sec'], y=df[column_map['memory_pressure_full_avg10']],
                    mode='lines', name='Full', line=dict(color='#85C1E9')),
         row=2, col=2
     )
@@ -255,24 +304,24 @@ def create_interactive_dashboard(df, output_dir):
     
     # Row 3: PIDs and Events
     fig.add_trace(
-        go.Scatter(x=df['elapsed_sec'], y=df['mycpu_pids_current'],
+        go.Scatter(x=df['elapsed_sec'], y=df[column_map['pids_current']],
                    mode='lines', name='PIDs', line=dict(color='#82E0AA')),
         row=3, col=1
     )
     fig.add_trace(
-        go.Scatter(x=df['elapsed_sec'], y=df['mycpu_cgroup_procs_count'],
+        go.Scatter(x=df['elapsed_sec'], y=df[column_map['cgroup_procs_count']],
                    mode='lines', name='Processes', line=dict(color='#D2B4DE')),
         row=3, col=1
     )
     
     fig.add_trace(
-        go.Scatter(x=df['elapsed_sec'], y=df['mycpu_memory_oom_events'],
+        go.Scatter(x=df['elapsed_sec'], y=df[column_map['memory_oom_events']],
                    mode='markers+lines', name='OOM Events',
                    line=dict(color='#E74C3C'), marker=dict(size=6)),
         row=3, col=2
     )
     fig.add_trace(
-        go.Scatter(x=df['elapsed_sec'], y=df['mycpu_memory_oom_kill_events'],
+        go.Scatter(x=df['elapsed_sec'], y=df[column_map['memory_oom_kill_events']],
                    mode='markers+lines', name='OOM Kills',
                    line=dict(color='#C0392B'), marker=dict(size=6, symbol='x')),
         row=3, col=2
@@ -329,17 +378,17 @@ def create_interactive_dashboard(df, output_dir):
     
     return html_file
 
-def create_summary_html(df, output_dir):
+def create_summary_html(df, output_dir, column_map):
     """Create a summary HTML page with key statistics."""
     monitoring_time = df['elapsed_sec'].max() - df['elapsed_sec'].min()
-    cpu_avg = (df['mycpu_cpu_usage_usec'].diff() / df['elapsed_sec'].diff() / 1e6).mean() * 100
-    cpu_max = (df['mycpu_cpu_usage_usec'].diff() / df['elapsed_sec'].diff() / 1e6).max() * 100
-    mem_avg_mb = df['mycpu_memory_current'].mean() / (1024 * 1024)
-    mem_peak_mb = df['mycpu_memory_peak'].max() / (1024 * 1024)
-    pids_avg = df['mycpu_pids_current'].mean()
-    pids_max = df['mycpu_pids_current'].max()
-    oom_events = df['mycpu_memory_oom_events'].sum()
-    oom_kills = df['mycpu_memory_oom_kill_events'].sum()
+    cpu_avg = (df[column_map['cpu_usage_usec']].diff() / df['elapsed_sec'].diff() / 1e6).mean() * 100
+    cpu_max = (df[column_map['cpu_usage_usec']].diff() / df['elapsed_sec'].diff() / 1e6).max() * 100
+    mem_avg_mb = df[column_map['memory_current']].mean() / (1024 * 1024)
+    mem_peak_mb = df[column_map['memory_peak']].max() / (1024 * 1024)
+    pids_avg = df[column_map['pids_current']].mean()
+    pids_max = df[column_map['pids_current']].max()
+    oom_events = df[column_map['memory_oom_events']].sum()
+    oom_kills = df[column_map['memory_oom_kill_events']].sum()
     
     html_content = f"""
     <!DOCTYPE html>
@@ -521,6 +570,8 @@ def main():
         parser = argparse.ArgumentParser(description='Generate combined metrics dashboard')
         parser.add_argument('--csv', type=str, required=True,
                           help='Path to the input CSV file')
+        parser.add_argument('--cgroup-name', type=str, required=False,
+                          help='Name of the cgroup in the CSV headers')
         parser.add_argument('--html-only', action='store_true',
                           help='Generate only HTML dashboard (skip static PNG)')
         args = parser.parse_args()
@@ -530,31 +581,36 @@ def main():
         if not csv_file.exists():
             raise FileNotFoundError(f"CSV file not found: {csv_file}")
             
-        output_dir = csv_file.parent / 'dashboard'
-        output_dir.mkdir(exist_ok=True)
+        output_base = csv_file.with_suffix('')  # Remove .csv extension but keep full path
+        output_dir = output_base / 'dashboard'
+        output_dir.mkdir(exist_ok=True, parents=True)
         
         # Load data
         print("Loading data from CSV...")
-        df = load_and_prepare_data(csv_file)
+        df, cgroup_name = load_and_prepare_data(csv_file, args.cgroup_name)
+        
+        # Create column mapping
+        column_map = create_column_mapping(df, cgroup_name)
+        print(f"Using cgroup name: {cgroup_name}")
         
         # Create dashboards
         if not args.html_only:
             print("Generating static PNG dashboard...")
-            create_static_dashboard(df, output_dir)
+            create_static_dashboard(df, output_dir, column_map)
         
         print("Generating interactive HTML dashboard...")
-        interactive_file = create_interactive_dashboard(df, output_dir)
+        interactive_file = create_interactive_dashboard(df, output_dir, column_map)
         
         print("Generating summary HTML page...")
-        summary_file = create_summary_html(df, output_dir)
+        summary_file = create_summary_html(df, output_dir, column_map)
         
         # Print summary
         print("\nDashboard Generation Complete:")
         print("============================")
         monitoring_time = df['elapsed_sec'].max() - df['elapsed_sec'].min()
-        cpu_avg = (df['mycpu_cpu_usage_usec'].diff() / df['elapsed_sec'].diff() / 1e6).mean() * 100
-        mem_avg_mb = df['mycpu_memory_current'].mean() / (1024 * 1024)
-        pids_avg = df['mycpu_pids_current'].mean()
+        cpu_avg = (df[column_map['cpu_usage_usec']].diff() / df['elapsed_sec'].diff() / 1e6).mean() * 100
+        mem_avg_mb = df[column_map['memory_current']].mean() / (1024 * 1024)
+        pids_avg = df[column_map['pids_current']].mean()
         
         print(f"1. Total monitoring time: {monitoring_time:.2f} seconds")
         print(f"2. Average CPU usage: {cpu_avg:.2f}%")
@@ -574,8 +630,9 @@ def main():
             print("Falling back to static dashboard only...")
             # Fallback to static only
             args.html_only = False
-            df = load_and_prepare_data(csv_file)
-            create_static_dashboard(df, output_dir)
+            df, cgroup_name = load_and_prepare_data(csv_file, args.cgroup_name)
+            column_map = create_column_mapping(df, cgroup_name)
+            create_static_dashboard(df, output_dir, column_map)
         else:
             raise
     except Exception as e:
