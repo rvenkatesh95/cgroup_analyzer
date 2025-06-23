@@ -4,13 +4,48 @@ import subprocess
 from pathlib import Path
 import sys
 import time
+import pandas as pd
 
-def run_visualization(script_name, csv_path):
+def detect_cgroup_name(csv_path):
+    """Detect cgroup name from CSV headers."""
+    try:
+        # Read just the header row from the CSV
+        df_header = pd.read_csv(csv_path, nrows=0)
+        columns = df_header.columns.tolist()
+        
+        # Find columns that match cgroup metrics pattern (excluding timestamp and elapsed_sec)
+        cgroup_columns = [col for col in columns if col not in ['timestamp', 'elapsed_sec']]
+        
+        if not cgroup_columns:
+            raise ValueError("No cgroup metric columns found in the CSV file")
+        
+        # Extract the cgroup name from the first cgroup metric column
+        # Format is expected to be {cgroup_name}_{metric_name}
+        first_column = cgroup_columns[0]
+        cgroup_name = first_column.split('_')[0]
+        
+        # Validate that this prefix is consistent across cgroup columns
+        if not all(col.startswith(f"{cgroup_name}_") for col in cgroup_columns):
+            # If inconsistent, return None to indicate a complex format
+            return None
+            
+        print(f"Detected cgroup name: {cgroup_name}")
+        return cgroup_name
+        
+    except Exception as e:
+        print(f"Error detecting cgroup name: {str(e)}")
+        return None
+
+def run_visualization(script_name, csv_path, cgroup_name=None):
     """Run a visualization script and handle any errors."""
     print(f"\nRunning {script_name}...")
     try:
+        cmd = [sys.executable, script_name, '--csv', str(csv_path)]
+        if cgroup_name:
+            cmd.extend(['--cgroup-name', cgroup_name])
+            
         result = subprocess.run(
-            [sys.executable, script_name, '--csv', str(csv_path)],
+            cmd,
             check=True,
             capture_output=True,
             text=True
@@ -41,6 +76,9 @@ def main():
         # Get the directory containing this script
         script_dir = Path(__file__).parent
 
+        # Detect cgroup name from CSV headers
+        cgroup_name = detect_cgroup_name(csv_path)
+
         # List of visualization scripts to run
         viz_scripts = [
             'visualize_cpu_metrics.py',
@@ -61,14 +99,24 @@ def main():
                 f"Missing visualization scripts: {', '.join(missing_scripts)}"
             )
 
+        # Create output directory based on CSV filename
+        output_base = csv_path.with_suffix('')  # Remove .csv extension but keep full path
+        output_base.mkdir(exist_ok=True)
+
+        # Create subdirectories
+        subdirs = ["cpu_plots", "memory_plots", "pids_plots", "dashboard"]
+        for subdir in subdirs:
+            (output_base / subdir).mkdir(exist_ok=True)
+
         print(f"Processing CSV file: {csv_path}")
+        print(f"Output directory: {output_base}")
         start_time = time.time()
 
         # Run each visualization script and track results
         results = []
         for script in viz_scripts:
             script_path = script_dir / script
-            success = run_visualization(script_path, csv_path)
+            success = run_visualization(script_path, csv_path, cgroup_name)
             results.append((script, success))
 
         end_time = time.time()
@@ -86,10 +134,10 @@ def main():
 
         print("\nOutput directories:")
         output_paths = [
-            csv_path.parent / "cpu_plots",
-            csv_path.parent / "memory_plots",
-            csv_path.parent / "pids_plots",
-            csv_path.parent / "dashboard"
+            output_base / "cpu_plots",
+            output_base / "memory_plots",
+            output_base / "pids_plots",
+            output_base / "dashboard"
         ]
         for path in output_paths:
             if path.exists():
