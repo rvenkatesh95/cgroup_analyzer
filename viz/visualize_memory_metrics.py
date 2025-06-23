@@ -11,21 +11,63 @@ plt.style.use('seaborn-v0_8')
 sns.set_theme(style="darkgrid")
 sns.set_palette("husl")
 
-def load_and_prepare_data(csv_file):
+def detect_cgroup_name(df):
+    """Detect cgroup name from DataFrame columns."""
+    # Find columns that match cgroup metrics pattern (excluding timestamp and elapsed_sec)
+    cgroup_columns = [col for col in df.columns if col not in ['timestamp', 'elapsed_sec']]
+    
+    if not cgroup_columns:
+        raise ValueError("No cgroup metric columns found in the DataFrame")
+    
+    # Extract the cgroup name from the first cgroup metric column
+    # Format is expected to be {cgroup_name}_{metric_name}
+    first_column = cgroup_columns[0]
+    cgroup_name = first_column.split('_')[0]
+    
+    # Validate that this prefix is consistent across cgroup columns
+    if not all(col.startswith(f"{cgroup_name}_") for col in cgroup_columns):
+        raise ValueError("Inconsistent cgroup prefixes found in column names")
+        
+    return cgroup_name
+
+def create_column_mapping(df, cgroup_name):
+    """Create mapping between generic metric names and actual column names."""
+    mapping = {}
+    generic_metrics = [
+        'memory_current', 'memory_peak', 'memory_max',
+        'memory_anon', 'memory_file', 'memory_kernel', 
+        'memory_swap_current', 'memory_swap_max',
+        'memory_oom_events', 'memory_oom_kill_events',
+        'memory_pressure_some_avg10', 'memory_pressure_full_avg10'
+    ]
+    
+    for metric in generic_metrics:
+        column_name = f"{cgroup_name}_{metric}"
+        if column_name in df.columns:
+            mapping[metric] = column_name
+    
+    return mapping
+
+def load_and_prepare_data(csv_file, cgroup_name=None):
     """Load and prepare the CSV data for visualization."""
     df = pd.read_csv(csv_file)
     # Convert timestamps to datetime
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
-    return df
+    
+    # Detect cgroup name if not provided
+    if not cgroup_name:
+        cgroup_name = detect_cgroup_name(df)
+    
+    return df, cgroup_name
 
-def plot_memory_usage(df, output_dir):
+def plot_memory_usage(df, output_dir, column_map):
     """Plot memory usage metrics."""
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
     
     # Convert to MB for better readability
-    df['memory_current_mb'] = df['mycpu_memory_current'] / (1024 * 1024)
-    df['memory_peak_mb'] = df['mycpu_memory_peak'] / (1024 * 1024)
-    df['memory_max_mb'] = df['mycpu_memory_max'].replace('max', str(float('inf'))).astype(float) / (1024 * 1024)
+    df['memory_current_mb'] = df[column_map['memory_current']] / (1024 * 1024)
+    df['memory_peak_mb'] = df[column_map['memory_peak']] / (1024 * 1024)
+    df['memory_max_mb'] = df[column_map['memory_max']].replace('max', str(float('inf'))).astype(float) / (1024 * 1024)
     
     # Plot current and peak memory
     ax1.plot(df['elapsed_sec'], df['memory_current_mb'], label='Current Memory')
@@ -56,9 +98,9 @@ def plot_memory_usage(df, output_dir):
     ax2.grid(True)
     
     # Plot memory components absolute values
-    df['anon_mb'] = df['mycpu_memory_anon'] / (1024 * 1024)
-    df['file_mb'] = df['mycpu_memory_file'] / (1024 * 1024)
-    df['kernel_mb'] = df['mycpu_memory_kernel'] / (1024 * 1024)
+    df['anon_mb'] = df[column_map['memory_anon']] / (1024 * 1024)
+    df['file_mb'] = df[column_map['memory_file']] / (1024 * 1024)
+    df['kernel_mb'] = df[column_map['memory_kernel']] / (1024 * 1024)
     
     ax3.stackplot(df['elapsed_sec'], 
                  [df['anon_mb'], df['file_mb'], df['kernel_mb']],
@@ -88,13 +130,13 @@ def plot_memory_usage(df, output_dir):
     plt.savefig(output_dir / 'memory_usage.png', bbox_inches='tight', dpi=300)
     plt.close()
 
-def plot_memory_events(df, output_dir):
+def plot_memory_events(df, output_dir, column_map):
     """Plot memory events (OOM events)."""
     plt.figure(figsize=(12, 6))
     
-    plt.plot(df['elapsed_sec'], df['mycpu_memory_oom_events'], 
+    plt.plot(df['elapsed_sec'], df[column_map['memory_oom_events']], 
              label='OOM Events', marker='o')
-    plt.plot(df['elapsed_sec'], df['mycpu_memory_oom_kill_events'], 
+    plt.plot(df['elapsed_sec'], df[column_map['memory_oom_kill_events']], 
              label='OOM Kill Events', marker='x')
     
     plt.title('Memory OOM Events')
@@ -105,13 +147,13 @@ def plot_memory_events(df, output_dir):
     plt.savefig(output_dir / 'memory_events.png')
     plt.close()
 
-def plot_memory_pressure(df, output_dir):
+def plot_memory_pressure(df, output_dir, column_map):
     """Plot memory pressure metrics."""
     plt.figure(figsize=(12, 6))
     
-    plt.plot(df['elapsed_sec'], df['mycpu_memory_pressure_some_avg10'], 
+    plt.plot(df['elapsed_sec'], df[column_map['memory_pressure_some_avg10']], 
              label='Some Pressure (10s avg)')
-    plt.plot(df['elapsed_sec'], df['mycpu_memory_pressure_full_avg10'], 
+    plt.plot(df['elapsed_sec'], df[column_map['memory_pressure_full_avg10']], 
              label='Full Pressure (10s avg)')
     
     plt.title('Memory Pressure Over Time')
@@ -122,13 +164,13 @@ def plot_memory_pressure(df, output_dir):
     plt.savefig(output_dir / 'memory_pressure.png')
     plt.close()
 
-def plot_memory_swap(df, output_dir):
+def plot_memory_swap(df, output_dir, column_map):
     """Plot swap usage metrics."""
     plt.figure(figsize=(12, 6))
     
     # Convert to MB
-    df['swap_current_mb'] = df['mycpu_memory_swap_current'] / (1024 * 1024)
-    swap_max = df['mycpu_memory_swap_max'].replace('max', str(float('inf'))).astype(float) / (1024 * 1024)
+    df['swap_current_mb'] = df[column_map['memory_swap_current']] / (1024 * 1024)
+    swap_max = df[column_map['memory_swap_max']].replace('max', str(float('inf'))).astype(float) / (1024 * 1024)
     
     plt.plot(df['elapsed_sec'], df['swap_current_mb'], label='Swap Usage')
     if not np.isinf(swap_max.iloc[0]):
@@ -142,22 +184,22 @@ def plot_memory_swap(df, output_dir):
     plt.savefig(output_dir / 'memory_swap.png')
     plt.close()
 
-def plot_memory_correlations(df, output_dir):
+def plot_memory_correlations(df, output_dir, column_map):
     """Plot correlations between different memory metrics."""
     # Calculate memory rates
-    df['memory_rate'] = df['mycpu_memory_current'].diff() / df['elapsed_sec'].diff()
+    df['memory_rate'] = df[column_map['memory_current']].diff() / df['elapsed_sec'].diff()
     
     # Select relevant memory metrics
     memory_metrics = {
-        'Memory Usage': 'mycpu_memory_current',
+        'Memory Usage': column_map['memory_current'],
         'Memory Rate': 'memory_rate',
-        'Anonymous Mem': 'mycpu_memory_anon',
-        'File Mem': 'mycpu_memory_file',
-        'Kernel Mem': 'mycpu_memory_kernel',
-        'Swap Usage': 'mycpu_memory_swap_current',
-        'OOM Events': 'mycpu_memory_oom_events',
-        'Some Pressure': 'mycpu_memory_pressure_some_avg10',
-        'Full Pressure': 'mycpu_memory_pressure_full_avg10'
+        'Anonymous Mem': column_map['memory_anon'],
+        'File Mem': column_map['memory_file'],
+        'Kernel Mem': column_map['memory_kernel'],
+        'Swap Usage': column_map['memory_swap_current'],
+        'OOM Events': column_map['memory_oom_events'],
+        'Some Pressure': column_map['memory_pressure_some_avg10'],
+        'Full Pressure': column_map['memory_pressure_full_avg10']
     }
     
     # Create correlation matrix
@@ -185,19 +227,19 @@ def plot_memory_correlations(df, output_dir):
     plt.savefig(output_dir / 'memory_correlations.png', dpi=300, bbox_inches='tight')
     plt.close()
 
-def plot_memory_heatmap(df, output_dir):
+def plot_memory_heatmap(df, output_dir, column_map):
     """Generate a heatmap of memory usage intensity over time."""
     # Create time bins (every minute) and usage intensity bins
     # Create time bins
     df['time_bin'] = pd.cut(df['elapsed_sec'], bins=50)  # 50 time segments
     
     # Calculate memory usage percentage
-    max_memory = df['mycpu_memory_max'].replace('max', str(float('inf'))).astype(float)
+    max_memory = df[column_map['memory_max']].replace('max', str(float('inf'))).astype(float)
     if np.all(np.isinf(max_memory)):
         # If no memory limit is set, calculate percentage relative to peak memory
-        max_memory = df['mycpu_memory_peak'].max()
+        max_memory = df[column_map['memory_peak']].max()
     
-    df['memory_usage_pct'] = (df['mycpu_memory_current'] / max_memory) * 100
+    df['memory_usage_pct'] = (df[column_map['memory_current']] / max_memory) * 100
     
     try:
         # Try to create quantile bins, but handle cases with duplicate values
@@ -241,6 +283,8 @@ def main():
         parser = argparse.ArgumentParser(description='Generate memory metrics visualizations')
         parser.add_argument('--csv', type=str, required=True,
                           help='Path to the input CSV file')
+        parser.add_argument('--cgroup-name', type=str, required=False,
+                          help='Name of the cgroup in the CSV headers')
         args = parser.parse_args()
         
         # Set up paths
@@ -248,29 +292,36 @@ def main():
         if not csv_file.exists():
             raise FileNotFoundError(f"CSV file not found: {csv_file}")
             
-        output_dir = csv_file.parent / 'memory_plots'
-        output_dir.mkdir(exist_ok=True)
+        output_base = csv_file.with_suffix('')  # Remove .csv extension but keep full path
+        output_dir = output_base / 'memory_plots'
+        output_dir.mkdir(exist_ok=True, parents=True)
         
         # Load data
         print("Loading data from CSV...")
-        df = load_and_prepare_data(csv_file)
+        df, cgroup_name = load_and_prepare_data(csv_file, args.cgroup_name)
+        
+        # Create mapping from generic metric names to actual column names
+        column_map = create_column_mapping(df, cgroup_name)
+        print(f"Using cgroup name: {cgroup_name}")
         
         # Create plots
         print("Generating memory usage plots...")
-        plot_memory_usage(df, output_dir)
-        plot_memory_events(df, output_dir)
-        plot_memory_pressure(df, output_dir)
-        plot_memory_heatmap(df, output_dir)
+        plot_memory_usage(df, output_dir, column_map)
+        plot_memory_events(df, output_dir, column_map)
+        plot_memory_pressure(df, output_dir, column_map)
+        plot_memory_swap(df, output_dir, column_map)
+        plot_memory_correlations(df, output_dir, column_map)
+        plot_memory_heatmap(df, output_dir, column_map)
         
         # Print statistics
         print("\nKey Memory Statistical Insights:")
         print("==============================")
-        current_mb = df['mycpu_memory_current'].iloc[-1] / (1024 * 1024)
-        peak_mb = df['mycpu_memory_peak'].max() / (1024 * 1024)
+        current_mb = df[column_map['memory_current']].iloc[-1] / (1024 * 1024)
+        peak_mb = df[column_map['memory_peak']].max() / (1024 * 1024)
         print(f"1. Current memory usage: {current_mb:.2f} MB")
         print(f"2. Peak memory usage: {peak_mb:.2f} MB")
-        print(f"3. Total OOM events: {df['mycpu_memory_oom_events'].max()}")
-        print(f"4. Memory pressure (10s avg): {df['mycpu_memory_pressure_some_avg10'].mean():.2f}%")
+        print(f"3. Total OOM events: {df[column_map['memory_oom_events']].max()}")
+        print(f"4. Memory pressure (10s avg): {df[column_map['memory_pressure_some_avg10']].mean():.2f}%")
         print(f"\nPlots have been saved to: {output_dir}")
         
     except Exception as e:
